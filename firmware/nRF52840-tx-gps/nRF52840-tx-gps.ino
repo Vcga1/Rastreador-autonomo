@@ -1,8 +1,8 @@
 /*
  * Nodo GPS solar - nRF52840 + RA-02 (SX1278) + NEO-6M
  * ------------------------------------------------------
- * Cada 5 minutos: enciende/lee el GPS, obtiene fix, transmite por LoRa
- * un mensaje con ID + posición, y vuelve a dormir.
+ * Enciende/lee el GPS, transmite por LoRa un mensaje con ID + posición,
+ * y vuelve a dormir. Reintenta cada 3 minutos si no obtiene fix.
  *
  * Requiere la librería TinyGPS++ (Mikal Hart) - instálala desde el
  * Library Manager del Arduino IDE.
@@ -48,7 +48,8 @@
 #define GPS_POWER_ON   LOW  // ajusta segun tu circuito (activo alto/bajo)
 #define GPS_POWER_OFF  1
 
-#define TX_INTERVAL_MS   (15UL * 60UL * 1000UL)  // 5 minutos
+#define TX_INTERVAL_MS   (15UL * 60UL * 1000UL)  // intervalo normal: 15 minutos
+#define GPS_RETRY_INTERVAL_MS (3UL * 60UL * 1000UL)  // reintento tras NOFIX
 #define GPS_FIX_TIMEOUT_MS  120000UL             // maximo tiempo esperando fix (cold start)
 
 // Pon en 1 solo mientras depuras
@@ -114,14 +115,15 @@ void setup() {
 }
 
 void loop() {
-  String payload = obtenerPosicionGPS();
+  String payload;
+  bool fixValido = obtenerPosicionGPS(payload);
   transmitir(payload);
 
-  // MCU en bajo consumo el resto del ciclo
-  delay(TX_INTERVAL_MS);
+  // Reintenta mas seguido mientras no haya fix; vuelve al intervalo normal al obtenerlo.
+  delay(fixValido ? TX_INTERVAL_MS : GPS_RETRY_INTERVAL_MS);
 }
 
-String obtenerPosicionGPS() {
+bool obtenerPosicionGPS(String &msg) {
   #ifdef GPS_POWER_PIN
     digitalWrite(GPS_POWER_PIN, GPS_POWER_ON);
     delay(100);  // tiempo de arranque del modulo
@@ -142,7 +144,6 @@ String obtenerPosicionGPS() {
     }
   }
 
-  String msg;
   if (fixValido) {
     msg = String(DEVICE_ID) + ","
         + String(gps.location.lat(), 6) + ","
@@ -161,7 +162,7 @@ String obtenerPosicionGPS() {
     digitalWrite(GPS_POWER_PIN, GPS_POWER_OFF);
   #endif
 
-  return msg;
+  return fixValido;
 }
 
 void transmitir(const String &payload) {
